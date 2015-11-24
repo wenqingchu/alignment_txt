@@ -22,13 +22,15 @@ public:
 	Mat LPRedChannel;
 	Mat LPOpen;
 	Mat LPR[7];
+	double horizen_record;
+	double vertical_record;
 	LicensePlate(Mat s) : LP(s), LPColor(s) {}
 	void setImage(Mat s){LP=s;LPColor=s;}
-	Mat LPPreproccessing(const Mat&);
+	void LPPreproccessing(const Mat&);
 	void ScanToCutHorizenFrame(Mat& LP, Rect& LPRect);
 	//void ScanToCutVerticalFrame(Mat& LP, Rect& LPRect, Mat& RRR);
 	//vector<Rect> LPCharSegmentation(Rect);
-	void LPAlignment(Rect);
+	void LPAlignment();
 
 	string LPCharRecognition(vector<Rect>);
 	Mat LPRun();

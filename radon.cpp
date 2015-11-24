@@ -131,7 +131,7 @@ double LicensePlate::horizen(const Mat &src, Mat &dst) {
 	Mat temp;
 	
 	//threshold(src, temp, 0, 255, CV_THRESH_BINARY | CV_THRESH_OTSU);
-	OutputImage(src);
+	//OutputImage(src);
 	Sobel(src,temp,CV_8U,0,1);
 	
 	int st_row = sz / 2 - src.rows / 2;
@@ -142,28 +142,28 @@ double LicensePlate::horizen(const Mat &src, Mat &dst) {
 	temp.copyTo(myimg_ext(Range(st_row, st_row+temp.rows), Range(st_col, st_col+temp.cols)));	
 	LP.copyTo(myLP_ext(Range(st_row, st_row+LP.rows), Range(st_col, st_col+LP.cols)));
 	
-	//OutputImage(img_ext);
-	//OutputImage(myLP_ext);
 	int project_max = 0, submax = 0;
-	double theta_record,stheta;
+	double theta_record;
 	int sum;
 	Mat img_rot;
-	for (double theta = -30; theta < 30; ++theta) {
+	for (double theta = -40; theta < 40; ++theta) {
 		rotate_image(myimg_ext, img_rot, theta);
-		//OutputImage(img_rot);	
+		//OutputImage(img_rot);
 
 		sum = project_sum(img_rot);
-		cout << theta << " " << sum << endl;
-
 		if (sum > project_max) {
 		  project_max = sum;
 		  theta_record = theta;
 		}
+		//cout << theta << " : " << sum << endl;
 	}
-	//OutputImage(img_ext);
 	rotate_image(img_ext, dst, theta_record);
 	rotate_image(myLP_ext, myLP_ext, theta_record);
-	//OutputImage(dst);
+	Mat tmp;
+	rotate_image(LP, LP, theta_record);
+	//OutputImage(tmp);
+	//imwrite("tmp.jpg",LP);
+	
 	int s = src.rows - src.cols * tan(theta_record * 3.141592654 / 180);
 	s = s * cos(theta_record * 3.141592654 / 180) + 5; 
 	if(theta_record < 0)
@@ -192,13 +192,13 @@ double LicensePlate::horizen(const Mat &src, Mat &dst) {
 	dst = dst(ds);
 	//OutputImage(dst);
 	//OutputImage(myLP_ext);
-	myLP_dst = myLP_ext(ds);
+	//myLP_dst = myLP_ext(ds);
 	//OutputImage(myLP_dst);
 	resize(dst,dst,src.size());
-	resize(myLP_dst,LP,LP.size());
-	imwrite("tmp.jpg",LP);
+	//resize(myLP_dst,LP,LP.size());
+	
 
-	cout << "horizon: " << theta_record << endl;
+	//cout << "horizon: " << theta_record << endl;
 	
 
 	return theta_record;
@@ -213,7 +213,6 @@ double LicensePlate::vertical(const Mat &src, Mat &dst) {
 	
 	
 	Mat temp;
-	OutputImage(src);
 	Sobel(src,temp,CV_8U,1,0);
 	int st_row = sz / 2 - src.rows / 2;
 	int st_col = sz / 2 - src.cols / 2;
@@ -226,15 +225,15 @@ double LicensePlate::vertical(const Mat &src, Mat &dst) {
 	double theta_record,stheta;
 	int sum;
 	Mat img_rot;
-	for (double theta = 65; theta < 115; ++theta) {
+	for (double theta = 82; theta < 98; ++theta) {
 	  if(theta == 90) continue;
-		//rotate_image(myimg_ext, img_rot, theta);
-		rotate_image(myimg_ext, img_rot, theta);
-		sum = myproject_sum(img_rot);
-		if (sum > project_max) {
-		  project_max = sum;
-		  theta_record = theta;
-		}
+	  rotate_image(myimg_ext, img_rot, theta);
+	  sum = myproject_sum(img_rot);
+	  if (sum > project_max) {
+	    project_max = sum;
+	    theta_record = theta;
+	    
+	  }
 	}
 
 	theta_record = 90 - theta_record;
@@ -269,7 +268,6 @@ double LicensePlate::vertical(const Mat &src, Mat &dst) {
 	    }
 	  }
 	}
-	cout << "vertical: " << theta_record << endl;
 	return theta_record;
 	
 }

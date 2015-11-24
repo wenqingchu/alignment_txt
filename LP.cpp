@@ -69,13 +69,18 @@ bool LicensePlate::IsMyLPColor(int b, int g, int r) {
 	return ((b>110 && g<90 && r<60) || (b<50 && g>200 && r>200));
 }
 
-Mat LicensePlate::LPPreproccessing(const Mat& LP) {
+void LicensePlate::LPPreproccessing(const Mat& LP) {
 
-	vector<Mat> mv;
+  if (LPColor.channels() == 3){
+    	vector<Mat> mv;
 	split(LPColor, mv);
 	LPRedChannel = mv[2].clone();
-	return LPRedChannel.clone();
-
+  }
+  else{
+    LPRedChannel = LPColor.clone();
+  }
+  double scale = 100 / LP.rows;
+  resize(LPRedChannel, LPRedChannel, Size(int(LP.cols*scale), int(LP.rows*scale)));
 }
 
 
@@ -419,7 +424,6 @@ void LicensePlate::ScanToCutHorizenFrame(Mat& LP, Rect& LPRect) {
 		isOkCol[c] = nChange;
 		//printf("c:%d, nChange:%d, cCount:%d\n", c, nChange, cCount[c]);
 	}
-	//cout << "guoxin error 1!" << endl;
 	int startC = 2, endC = 248;
 
 	LPRect.x += startC;
@@ -433,16 +437,16 @@ void LicensePlate::ScanToCutHorizenFrame(Mat& LP, Rect& LPRect) {
 
 
 
-void LicensePlate::LPAlignment(Rect LPRect) {
+void LicensePlate::LPAlignment() {
   
-	Mat ROI = LPRedChannel(LPRect).clone();
+	Mat ROI = LPRedChannel.clone();
 
 	ImageEnhancement(ROI);
-	
 
 	Mat temp;
 	ROI.copyTo(temp);
-	double theta_record = horizen(ROI,temp);
+	horizen_record = horizen(ROI,temp);
+	/*
 	ROI = temp;
 
 	threshold(ROI, ROI, 0, 255, CV_THRESH_BINARY | CV_THRESH_OTSU);
@@ -474,27 +478,25 @@ void LicensePlate::LPAlignment(Rect LPRect) {
 	    
 	  }
 	}
+	*/
+	//vector<int> aa;
+	//vector<Rect> rr;
+	//GetComponent(ROI, aa, rr);
+	//DeleteSmallNonLPCompoent(ROI, aa, rr, 100);
+	//Rect place;
+	//place.x = 0;
+	//place.y = 0;
+	//place.width = int(100.0 / LP.rows * LP.cols);
+	//place.height = 100;
 	
-	vector<int> aa;
-	vector<Rect> rr;
-	GetComponent(ROI, aa, rr);
-	DeleteSmallNonLPCompoent(ROI, aa, rr, 100);
-	ScanToCutHorizenFrame(ROI, LPRect);
-	theta_record = vertical(ROI,temp);
-	gx_img = LP;
-
+	//ScanToCutHorizenFrame(ROI, place);
+	//vertical_record = vertical(ROI,temp);
 }
 
 Mat LicensePlate::LPRun() {
 	LPPreproccessing(LP);
-
-	Rect place;
-	place.x = 0;
-	place.y = 0;
-	place.width = 250;
-	place.height = 100;
 	
-	LPAlignment(place);
-	return gx_img;
+	LPAlignment();
+	return LP;
 }
 
