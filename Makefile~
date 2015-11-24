@@ -1,0 +1,33 @@
+OPENCV:=`pkg-config --cflags --libs opencv`
+
+CAFFE_PATH:=/home/odyssey/project/caffe
+INC:=$(CAFFE_PATH)/include/
+INC1:=$(CAFFE_PATH)/.build_release/src/ 
+INC2:=$(CAFFE_PATH)/src/
+INC3:=$(CAFFE_PATH)/include/caffe/
+INC4:=usr/local/cuda-6.5/include
+INC5:=usr/local/include/opencv
+INC6:=usr/local/include
+
+LIB:=$(CAFFE_PATH)/src/gtest/
+LIB2:=usr/local/cuda-6.5/lib64
+LIB3:=$(CAFFE_PATH)/
+LIB4:=$(CAFFE_PATH)/.build_release/lib/
+
+
+CC:=g++
+
+CPPS:=Main.cpp LP.cpp radon.cpp util.cpp cnn_classifier.cpp
+
+BIN:=main
+
+LINK:=-lgtest -lglog -lgflags -lprotobuf -lcaffe \
+      -lcublas -llmdb -lcblas -lboost_thread \
+      -lboost_system -lcurand -lleveldb \
+      -lsnappy -lpthread -lhdf5 -lhdf5_hl \
+
+main : $(CPPS)
+	$(CC) -o $(BIN) $(CPPS) -I/$(INC4) -I/$(INC3) -I/$(INC) -I/$(INC1) -I/$(INC2) -I/$(INC5) -I/$(INC6) -I$(OPENCV)  -L/usr/local/cuda/lib64/ -lcufft -lnpps -lnppi -lnppc -lcudart -L/$(LIB4) -L/$(LIB3)-L/$(LIB) -L/$(LIB2) $(LINK) -std=c++11
+
+
+clean: rm -f $(BIN) *.o

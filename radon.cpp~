@@ -1,0 +1,344 @@
+#include"LP.h"
+
+void LicensePlate::rotate_image(const Mat &src, Mat &dst, double angle) {
+	Point2d src_center(src.cols / 2.0, src.rows / 2.0);
+	Mat rot_mat = getRotationMatrix2D(src_center, angle, 1.0);
+	warpAffine(src, dst, rot_mat, src.size());
+}
+
+int project_sum(const Mat &src) {
+	vector<int> cnt(src.rows, 0);
+	//cout << "rows: " << src.rows << endl;
+	for (int i = 0.3 * src.rows; i < 0.7 * src.rows; ++i)
+	{
+		for (int j = 10; j < src.cols-10; ++j)
+		{
+		  cnt[i] += (src.at<uchar>(i, j));
+		  
+		}
+	}
+			
+		
+	return *max_element(cnt.begin(), cnt.end());
+}
+
+
+int myproject_sum(const Mat &src) {
+	vector<int> cnt(src.rows, 0);
+	int ret = 0;
+	for (int i = 1; i < src.rows; ++i)
+	{
+		for (int j = 0; j < src.cols; ++j)
+		{
+		  cnt[i] += (src.at<uchar>(i, j));
+		  
+		}
+		if(cnt[i] < 10)
+		{
+		  ret ++;
+		}
+	}
+			
+		
+
+	return ret;
+}
+
+
+bool is_minimum(const vector<int> &cnt, int id) {
+	int size = (int)cnt.size();
+	int radius = size / 20;
+	if (id - 1 >= 0 && cnt[id] > cnt[id - 1])
+		return false;
+	if (id + 1 < size && cnt[id] > cnt[id + 1])
+		return false;
+	bool flag = true;
+	for (int i = id - radius; i <= id + radius; ++i) {
+		if (i >= 0 && i < size && cnt[i] < cnt[id]) {
+			flag = false;
+			break;
+		}
+	}
+	return flag;
+}
+
+void vertical_cut(const Mat &src, Mat &dst) {
+	vector<int> cnt(src.rows, 0);
+	int total = 0;
+	for (int i = 0; i < src.rows; ++i)
+		for (int j = 0; j < src.cols; ++j) {
+			int tmp = src.at<uchar>(i, j);
+			cnt[i] += tmp;
+			total += tmp;
+		}
+	int threshold = total / (3 * src.rows);
+	int start_row, end_row;
+	for (int i = 0; i < src.rows; ++i) {
+		if (cnt[i] < threshold && is_minimum(cnt, i)) {
+			start_row = i;
+			break;
+		}
+	}
+	for (int i = src.rows - 1; i >= 0; --i) {
+		if (cnt[i] < threshold && is_minimum(cnt, i)) {
+			end_row = i;
+			break;
+		}
+	}
+	dst = src(Range(start_row+1, end_row-1), Range::all()).clone();
+}
+
+double LicensePlate::horizen(const Mat &src, Mat &dst) {
+	int sz = (int)sqrt(double(src.rows * src.rows) + double(src.cols * src.cols)) + 10;
+	Mat img_ext = Mat(sz, sz, CV_8UC1, Scalar::all(0));
+	Mat myimg_ext = Mat(sz, sz, CV_8UC1, Scalar::all(0));
+	Mat temp;
+	Sobel(src,temp,CV_8U,0,1);
+	//OutputImage(temp);
+	int st_row = sz / 2 - src.rows / 2;
+	int st_col = sz / 2 - src.cols / 2;
+	for (int i = 0; i < src.rows; ++i)
+		for (int j = 0; j < src.cols; ++j)
+		{
+		  img_ext.at<uchar>(st_row + i, st_col + j) = src.at<uchar>(i, j);
+		  myimg_ext.at<uchar>(st_row + i, st_col + j) = temp.at<uchar>(i, j);
+		}
+			
+	int project_max = 0, submax = 0;
+	double theta_record,stheta;
+	int sum;
+	Mat img_rot;
+	for (double theta = -8; theta < 10; ++theta) {
+		rotate_image(myimg_ext, img_rot, theta);
+		//OutputImage(img_rot);
+		
+
+		sum = project_sum(img_rot);
+		//sum = project_sum(img_rot);
+		//cout << "theta: " << theta << "  sum: " << sum << endl; 
+		if (sum > project_max) {
+		  submax = project_max;
+		  stheta = theta_record;
+		  project_max = sum;
+		  theta_record = theta;
+		}
+		else if(sum > submax)
+		{
+		  submax = sum;
+		  stheta = theta;
+		}
+	}
+	//theta_record = floor((theta_record + stheta) / 2); 
+	//cout << "theta_record " << theta_record << endl;
+	// because angle is not right
+	//if(theta_record <= 2) theta_record = 3;
+	//theta_record = 5;
+	
+	rotate_image(img_ext, dst, theta_record);
+	//cout << "theta_record: " << theta_record << endl;
+	int s = src.rows - src.cols * tan(theta_record * 3.141592654 / 180);
+	s = s * cos(theta_record * 3.141592654 / 180) + 2; 
+	if(theta_record < 0)
+	{
+	  s = src.rows;
+	}
+	s = (src.rows + s) / 2;
+	
+	int c = src.cols+10;
+	
+	if(theta_record > 0 && theta_record < 45)
+	{
+	  c = src.cols * cos((theta_record) * 3.141592654 / 180) + src.cols * sin((theta_record) * 3.141592654 / 180);
+	  //cout << c << endl;
+	}
+	//s = src.rows;
+	Rect ds;
+	ds.x = sz/2 - c/2;
+	ds.y = sz/2 - s/2;
+	ds.width = c; 
+	ds.height = s;
+	//cout << "haha" << endl;
+	//OutputImage(src);
+	//cout << "hah" << endl;
+	//OutputImage(dst);
+	dst = dst(ds);
+	resize(dst,dst,src.size());
+	//dst.resize(src.rows, src.cols);
+	//OutputImage(dst);
+	
+	
+	
+	
+	
+
+	
+
+
+	/*
+	if(theta_record > 0)
+	{
+	  int s,c = src.cols;
+	  s = src.rows - c * tan(theta_record * 3.141592654 / 180);
+	  //cout << theta_record << " " << tan(theta_record * 3.141592654 / 180) << endl;
+	  for(int i=0; i<src.cols; i++)
+	  {
+	    int start = i * tan(theta_record * 3.141592654 / 180);
+	    
+	    for(int j=0; j<src.rows; j++)
+	    {
+	      if(start + j>= src.rows-1) break;
+	      dst.at<uchar>(j, i) = src.at<uchar>(start + j, i);
+	      //dst.at<uchar>(j, i) = src.at<uchar>(j, i);
+	    }
+	  }
+	  
+	  Rect ds;
+	  ds.x = 0;
+	  ds.y = 0;
+	  ds.width = src.cols; 
+	  ds.height = s+3;
+
+	  //cout << "haha" << endl;
+	  //OutputImage(src);
+	  //cout << "hah" << endl;
+	  //OutputImage(dst);
+	  dst = dst(ds);
+	  //OutputImage(dst);
+	  resize(dst,dst,src.size());
+	  //dst.resize(src.rows, src.cols);
+	  //OutputImage(dst);
+	}
+	*/
+	//cout << "theta_record " << theta_record << endl;
+	
+	
+	
+
+	return theta_record;
+	
+}
+
+
+double LicensePlate::vertical(const Mat &src, Mat &dst) {
+	int sz = (int)sqrt(double(src.rows * src.rows) + double(src.cols * src.cols)) + 10;
+	Mat img_ext = Mat(sz, sz, CV_8UC1, Scalar::all(0));
+	Mat myimg_ext = Mat(sz, sz, CV_8UC1, Scalar::all(0));
+	Mat temp;
+	Sobel(src,temp,CV_8U,1,0);
+	OutputImage(temp);
+	int st_row = sz / 2 - src.rows / 2;
+	int st_col = sz / 2 - src.cols / 2;
+	for (int i = 0; i < src.rows; ++i)
+		for (int j = 0; j < src.cols; ++j)
+		{
+		  img_ext.at<uchar>(st_row + i, st_col + j) = src.at<uchar>(i, j);
+		  myimg_ext.at<uchar>(st_row + i, st_col + j) = temp.at<uchar>(i, j);
+		}
+	int project_max = 0, submax = 0;
+	double theta_record,stheta;
+	int sum;
+	Mat img_rot;
+	for (double theta = 82; theta < 94; ++theta) {
+	  if(theta == 90) continue;
+
+		rotate_image(img_ext, img_rot, theta);
+		//OutputImage(img_rot);
+		sum = myproject_sum(img_rot);
+		//cout << "theta: " << theta << "  sum: " << sum << endl; 
+		if (sum > project_max) {
+		  submax = project_max;
+		  stheta = theta_record;
+		  project_max = sum;
+		  theta_record = theta;
+		}
+		else if(sum > submax)
+		{
+		  submax = sum;
+		  stheta = theta;
+		}
+	}
+	//theta_record = floor((theta_record + stheta) / 2); 
+	//cout << "theta_record " << theta_record << endl;
+	// because angle is not right
+	theta_record = 90 - theta_record;
+	//cout << "vertical_theta: "  << theta_record << endl;
+	
+	
+	//theta_record = 5;
+	
+	if(theta_record > 0)
+	{
+	  int c,s = src.rows;
+	  c = src.cols - s * tan(theta_record * 3.141592654 / 180);
+	  //cout << theta_record << " " << tan(theta_record * 3.141592654 / 180) << endl;
+	  for(int i=0; i<src.rows; i++)
+	  {
+	    int start = i * tan(theta_record * 3.141592654 / 180);
+	    
+	    for(int j=0; j<src.cols; j++)
+	    {
+	      if(start + j>= src.cols-1) break;
+	      dst.at<uchar>(i, j) = src.at<uchar>(i, start+j);
+	    }
+	  }
+	  
+	  Rect ds;
+	  ds.x = 0;
+	  ds.y = 0;
+	  ds.width = c; 
+	  ds.height = src.rows;
+
+	  //cout << "haha" << endl;
+	  //OutputImage(src);
+	  //cout << "hah" << endl;
+	  //OutputImage(dst);
+	  dst = dst(ds);
+	  //OutputImage(dst);
+	  resize(dst,dst,src.size());
+	  //dst.resize(src.rows, src.cols);
+	  //OutputImage(dst);
+	}
+	else if(theta_record < 0)
+	{
+	  theta_record = -theta_record;
+	  int c,s = src.rows;
+	  c = src.cols - s * tan(theta_record * 3.141592654 / 180);
+	  //cout << theta_record << " " << tan(theta_record * 3.141592654 / 180) << endl;
+	  for(int i=0; i<src.rows; i++)
+	  {
+	    int start = (s-i) * tan(theta_record * 3.141592654 / 180);
+	    
+	    for(int j=0; j<src.cols; j++)
+	    {
+	      if(start + j>= src.cols-1) break;
+	      dst.at<uchar>(i, j) = src.at<uchar>(i, start+j);
+	    }
+	  }
+	  
+	  Rect ds;
+	  ds.x = 0;
+	  ds.y = 0;
+	  ds.width = c; 
+	  ds.height = src.rows;
+
+	  //cout << "haha" << endl;
+	  //OutputImage(src);
+	  //cout << "hah" << endl;
+	  //OutputImage(dst);
+	  dst = dst(ds);
+	  //OutputImage(dst);
+	  resize(dst,dst,src.size());
+	  //dst.resize(src.rows, src.cols);
+	  //OutputImage(dst);
+	}
+	else{
+	  dst = src;
+	}
+	//cout << "theta_record " << theta_record << endl;
+	
+	
+	
+
+	return theta_record;
+	
+}

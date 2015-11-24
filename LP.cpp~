@@ -1,0 +1,872 @@
+#include "LP.h"
+
+
+
+short dr[4][2] = {1, 0, 0, 1, -1, 0, 0, -1};
+short q[MAXR * MAXC][2];
+short mark[MAXR][MAXC];
+void LicensePlate::myFloodFill(const Mat& d, int r, int c, int label, int R, int C) {
+	int head = 0;
+	int tail = 0;
+	q[tail][0] = r;
+	q[tail][1] = c;
+	tail++;
+	mark[r][c] = label;
+	while(head < tail) {
+		int cr = q[head][0];
+		int cc = q[head][1];
+		head++;
+		for(int i = 0; i < 4; i++) {
+			int nr = cr + dr[i][0];
+			int nc = cc + dr[i][1];
+			if(nr < 0 || nr >= R || nc < 0 || nc >= C || mark[nr][nc] != -1 || !d.at<uchar>(nr, nc)) continue;
+			mark[nr][nc] = label;
+			q[tail][0] = nr;
+			q[tail][1] = nc;
+			tail++;
+		}
+	}
+}
+
+int LicensePlate::GetComponent(const Mat& LP, vector<int>& area, vector<Rect>& rect) {
+	int R = LP.rows;
+	int C = LP.cols;
+	memset(mark, -1, R * sizeof(mark[0]));
+	int nComponent = 0;
+	for(int r = 0; r < R; r++)
+		for(int c = 0; c < C; c++) {
+			if(mark[r][c] == -1 && LP.at<uchar>(r, c))
+				myFloodFill(LP, r, c, nComponent++, R, C);
+		}
+	area.resize(nComponent, 0);
+	rect.resize(nComponent);
+	vector<pair<Point, Point> > vr(nComponent);
+	for(int i = 0; i < nComponent; i++) {
+		vr[i].first.x = 10000;
+		vr[i].first.y = 10000;
+		vr[i].second.x = 0;
+		vr[i].second.y = 0;
+	}
+	for(int r = 0; r < R; r++)
+		for(int c = 0; c < C; c++) {
+			int which = mark[r][c];
+			if(which != -1) {
+				area[which]++;
+				if(vr[which].first.x > c) vr[which].first.x = c;
+				if(vr[which].first.y > r) vr[which].first.y = r;
+				if(vr[which].second.x < c) vr[which].second.x = c;
+				if(vr[which].second.y < r) vr[which].second.y = r;
+			}
+		}
+	for(int i = 0;  i < nComponent; i++) {
+		rect[i] = Rect(vr[i].first, vr[i].second);
+	}
+	return nComponent;
+}
+
+Mat LicensePlate::LPPreproccessing(const Mat& LP) {
+	double scale = (double) LPNormalRows / LP.rows;
+	//cout << "scale: " << scale << endl;
+	resize(LP, LPColor, Size(), scale, scale);
+	vector<Mat> mv;
+	split(LPColor, mv);
+	LPRedChannel = mv[2].clone();
+	return LPRedChannel.clone();
+}
+
+
+void LicensePlate::DeleteSmallNonLPCompoent(Mat& LP, vector<int>& area, vector<Rect>& rect, int minComponentThreshold) {
+	int nComponent = area.size();
+	for(int i = 0; i < nComponent; i++) {
+		if(area[i] < minComponentThreshold) area[i] = 0;
+		if(rect[i].height < 30) area[i] = 0;
+	}
+	for(int r = 0; r < LP.rows; r++)
+		for(int c = 0; c < LP.cols; c++) {
+			int which = mark[r][c];
+			if(which != -1 && !area[which]) {
+				LP.at<uchar>(r, c) = 0;
+			}
+		}
+	vector<int> tArea = area;
+	vector<Rect> tRect = rect;
+	area.clear();
+	rect.clear();
+	for(int i = 0; i < nComponent; i++) {
+		if(tArea[i]) {
+			area.push_back(tArea[i]);
+			rect.push_back(tRect[i]);
+		}
+	}
+}
+
+bool Intersect(Rect a, Rect b, Rect& uRect) {
+	if(a.x > b.x) swap(a, b);
+	uRect = a | b;
+	if(abs(a.y - b.y) < 30 && abs(a.height - b.height) < 30 && ((a & b).width > 0 || abs(a.x + a.width - b.x) < 50)) return 1;
+	return 0;
+}
+
+void LicensePlate::UnionComponent(Mat& LP, vector<int>& area, vector<Rect>& rect) {
+	int maxUnion = 20;
+	while(maxUnion--) {
+		int changed = 1;
+		int nComponent = area.size();
+		vector<int> ar;
+		vector<Rect> rt;
+		for(int i = 0; i < nComponent; i++) {
+			if(!area[i]) continue;
+			bool isIntersect = 0;
+			for(int j = i + 1; j < nComponent; j++) {
+				Rect uRect;
+				if(area[j] && Intersect(rect[i], rect[j], uRect)) {
+					ar.push_back(area[i] + area[j]);
+					rt.push_back(uRect);
+					area[j] = 0;
+					isIntersect = 1;
+					break;
+				}
+			}
+			if(!isIntersect) {
+				ar.push_back(area[i]);
+				rt.push_back(rect[i]);
+			}
+		}
+		area = ar, rect = rt;
+		if(!changed) break;
+	}
+}
+
+bool LicensePlate::IsLPColor(int H, int S, int B) {
+	return H > 90 && H < 130 && S > 30 && B > 50;
+}
+
+bool LicensePlate::IsPossibleLPUsingColorFeature(const Mat& LPColor, Rect& rect, int& area) {
+	Mat ROI = LPColor(rect).clone();
+	Mat binary, HSV;
+	cvtColor(ROI, binary, CV_BGR2GRAY);
+	cvtColor(ROI, HSV, CV_BGR2HSV);
+	int R = HSV.rows;
+	int C = HSV.cols;
+	int nBluePixel = 0;
+	for(int r = 0; r < R; r++)
+		for(int c = 0; c < C; c++) {
+			uchar h = HSV.at<uchar>(r, c * 3);
+			uchar s = HSV.at<uchar>(r, c * 3 + 1);
+			uchar b = HSV.at<uchar>(r, c * 3 + 2);
+			if(IsLPColor(h, s, b)) {
+				nBluePixel++;
+				binary.at<uchar>(r, c) = 255;
+			} else {
+				binary.at<uchar>(r, c) = 0;
+			}
+		}
+	//OutputImage(binary);
+	//cout << "LP area color pixels: " << nBluePixel << endl;
+	if(nBluePixel < 10000) return 0;
+	//if(rect.area() < 50000) return 1;
+	//OutputImage(binary);
+	vector<Rect> rt;
+	vector<int> ar;
+
+	Mat HClose = getStructuringElement(MORPH_CROSS, Size(15, 1));
+	morphologyEx(binary, binary, MORPH_CLOSE, HClose);
+	//OutputImage(binary);
+	Mat VerticalGap = getStructuringElement(MORPH_CROSS, Size(1, 5));
+
+	morphologyEx(binary, binary, MORPH_OPEN, VerticalGap);
+
+	GetComponent(binary, ar, rt);
+	for(int i = 0; i < ar.size(); i++)
+		rectangle(binary, rt[i], Scalar(255, 255, 255), 3);
+
+
+	int which = max_element(ar.begin(), ar.end()) - ar.begin();
+	rt[which].x += rect.x;
+	rt[which].y += rect.y;
+	rect = rt[which];
+	area = ar[which];
+	//OutputImage(LPColor(rect));
+	return 3 * nBluePixel > rect.area();
+}
+
+bool LicensePlate::IsPossibleLPUsingCharFeature(Rect LPRect) {
+	Mat ROI = LPRedChannel(LPRect).clone();
+	medianBlur(ROI, ROI, 3);
+	threshold(ROI, ROI, 0, 255, CV_THRESH_BINARY | CV_THRESH_OTSU);
+	Mat RR = ROI.clone();
+	Mat HClose = getStructuringElement(MORPH_CROSS, Size(45, 1));
+	morphologyEx(RR, RR, MORPH_CLOSE, HClose);
+
+	vector<int> ar;
+	vector<Rect> rt;
+
+	GetComponent(RR, ar, rt);
+	int maxRectArea = 0, p = -1;
+	for(int i = 0; i < ar.size(); i++) {
+		if(maxRectArea < ar[i]) {
+			maxRectArea = ar[i];
+			p = i;
+		}
+	}
+	assert(p != -1);
+	LPRect.x += rt[p].x;
+	LPRect.y += rt[p].y;
+	LPRect.width = rt[p].width;
+	LPRect.height = rt[p].height;
+
+	ROI = ROI(rt[p]);
+
+	int xHist[MAXC];
+	memset(xHist, 0, sizeof(xHist));
+	for(int r = 0; r < ROI.rows; r++)
+		for(int c = 0; c < ROI.cols; c++) {
+			if(ROI.at<uchar>(r, c)) xHist[c]++;
+		}
+	// 	Mat hist(1, ROI.cols, CV_16UC1);
+	// 	for(int i = 0; i < ROI.cols; i++) hist.at<ushort>(0, i) = xHist[i];
+	// 	imwrite("1.JPG", hist);
+	int N = ROI.cols;
+	int rk[MAXC];
+	memcpy(rk, xHist, sizeof(rk));
+	sort(rk, rk + N);
+	int bottomThreshold = 0;
+	int topThreshold = 0;
+	int percent = N / 3;
+	for(int i = 0; i < percent; i++) {
+		bottomThreshold += rk[i];
+		topThreshold += rk[N - i - 1];
+	}
+	bottomThreshold /= percent;
+	topThreshold /= percent;
+
+	bottomThreshold = max(topThreshold / 10, bottomThreshold);
+	bool isTop[MAXC];
+	for(int i = 0; i < N; i++) {
+		isTop[i] = (xHist[i] >= bottomThreshold);
+	}
+	Mat hist(1, ROI.cols, CV_8UC1);
+	vector<pair<int, int> > interval, unionInterval;
+	for(int i = 0; i < ROI.cols; i++) {
+		hist.at<uchar>(0, i) = isTop[i];
+		if(isTop[i]) interval.push_back(make_pair(i, i + 1));
+	}
+	int L, R = -100;
+	for(int i = 0; i < interval.size(); i++) {
+		int l = interval[i].first;
+		int r = interval[i].second;
+		if(l - R < 5) {
+			R = r;
+		} else {
+			if(R != -100) unionInterval.push_back(make_pair(L, R));
+			L = l, R = r;
+		}
+	}
+	if(R != -100) unionInterval.push_back(make_pair(L, R));
+
+	if(unionInterval.size() < 3 || unionInterval.size() > 10) return 0;
+
+	return 1;
+}
+
+
+void LicensePlate::FinallyDeleteNonLPCompoent(Mat& LP, vector<int>& area, vector<Rect>& rect, int minComponentThreshold = 0) {
+	int nComponent = area.size();
+	vector<pair<int, int> > score(nComponent);
+	for(int i = 0; i < nComponent; i++) {
+		if(area[i] < minComponentThreshold) score[i].first = 0, score[i].second = 0;
+		else {
+			score[i].first += 100;
+			score[i].second += 100;
+			if(IsPossibleLPUsingColorFeature(LPColor, rect[i], area[i])) score[i].first++, score[i].second += 10;
+			int w = rect[i].width;
+			int h = rect[i].height;
+			if(w > 2 * h && w < 6 * h) score[i].first++, score[i].second = 10 / (abs(w / h - 4) + 1);
+			if(w * h < 4 * area[i]) score[i].first++, score[i].second = 6 * area[i] / (w * h);
+			if(4 * w * h < LP.rows * LP.cols) score[i].first++, score[i].second += 10;
+			if(IsPossibleLPUsingCharFeature(rect[i])) score[i].first++, score[i].second += 10;
+		}
+	}
+
+	pair<int, int> maxScore = *max_element(score.begin(), score.end());
+
+	for(int i = 0; i < nComponent; i++)
+		if(score[i].first < maxScore.first) area[i] = 0;
+
+	vector<int> tArea = area;
+	vector<Rect> tRect = rect;
+	area.clear();
+	rect.clear();
+	for(int i = 0; i < nComponent; i++) {
+		if(tArea[i]) {
+			area.push_back(tArea[i]);
+			rect.push_back(tRect[i]);
+		}
+	}
+}
+
+void LicensePlate::ImageEnhancement(Mat& LP) {
+	int hist[256];
+	memset(hist, 0, sizeof(hist));
+	for(int r = 0; r < LP.rows; r++)
+		for(int c = 0; c < LP.cols; c++)
+			++hist[LP.at<uchar>(r, c)];
+	int size = LP.rows * LP.cols;
+	int L = size / 100;
+	int H = 99 * size / 100;
+	int a = 0, b = 255;
+	int tot = 0;
+	for(int i = 0; i < 256; i++) {
+		tot += hist[i];
+		if(tot < L) a = i;
+		if(tot > H && b == 255) b = i - 1;
+	}
+	int match[256];
+	for(int i = 0; i < 256; i++) {
+		if(i < a) match[i] = 0;
+		else if(i > b) match[i] = 255;
+		else match[i] = 255 * (i - a) / (b - a);
+	}
+	for(int r = 0; r < LP.rows; r++)
+		for(int c = 0; c < LP.cols; c++) {
+			uchar &t = LP.at<uchar>(r, c);
+			t = match[t];
+		}
+}
+
+void LicensePlate::MorphOperation(Mat& LP) {
+	Mat Back = getStructuringElement(MORPH_RECT, Size(25, 25));
+	Mat VerticalGap = getStructuringElement(MORPH_CROSS, Size(1, 5));
+	Mat One = getStructuringElement(MORPH_CROSS, Size(35, 1));
+	morphologyEx(LP, LP, MORPH_TOPHAT, Back);
+	ImageEnhancement(LP);
+	threshold(LP, LP, 0, 255, CV_THRESH_BINARY | CV_THRESH_OTSU);
+	LPOpen = LP.clone();
+	morphologyEx(LP, LP, MORPH_CLOSE, One);
+	morphologyEx(LP, LP, MORPH_OPEN, VerticalGap);//67
+}
+
+Rect LicensePlate::LPDetection(Mat& LP) {
+	MorphOperation(LP);
+	vector<int> ar;
+	vector<Rect> rt;
+	GetComponent(LP, ar, rt);
+	DeleteSmallNonLPCompoent(LP, ar, rt, 500);
+	UnionComponent(LP, ar, rt);
+	//OutputImage(LP);
+	FinallyDeleteNonLPCompoent(LP, ar, rt, 8000);
+// 	for(int i = 0; i < ar.size(); i++) {
+// 		rectangle(LPRedChannel, rt[i], Scalar(255, 255, 255), 2);
+// 	}
+// 	OutputImage(LPRedChannel);
+	return rt[0];
+}
+
+void ScanToCutHorizenFrame(Mat& LP, Rect& LPRect, Mat& RRR) {
+	int R = LP.rows;
+	int C = LP.cols;
+	//medianBlur(LP, LP, 5);
+ 	//OutputImage(LP);
+	int isOkRow[MAXR], rCount[MAXR];
+	memset(isOkRow, 0, sizeof(isOkRow));
+	memset(rCount, 0, sizeof(rCount));
+	
+	int threshold = 0;
+
+	for(int r = 0; r < R; r++) {
+		int nChange = 0;
+		for(int c = 5; c < C; c++) {
+			if(LP.at<uchar>(r, c) != LP.at<uchar>(r, c - 5)) nChange++;
+			if(LP.at<uchar>(r, c) == 255) rCount[r]++;
+		}
+		if(r>25 && r<=75)
+		{
+		  threshold = threshold + rCount[r];
+		}
+		int percent = 100.0 * rCount[r] / C;
+		if(nChange > 10 && percent > 10 && percent < 70) isOkRow[r] = 1;
+		if(nChange < 10 && (percent < 10 || percent > 70)) {
+			isOkRow[r] = -100;
+		}
+	}
+	//cout << "threshold: " << threshold/50 << endl;
+	threshold = 0.55 * threshold / 50;
+	//cout << "threshold: " << threshold << endl;
+	int startR = 10, endR = 90;
+	for(int r = R/2; r < R; r++)
+	{
+	  if(rCount[r] < threshold || rCount[r] > 180)
+	  {
+	    endR = r-1;
+	    break;
+	  }
+	}
+	
+	for(int r = R/2-5; r > 0; r--)
+	{
+	  if(rCount[r] < 40 || rCount[r] > 180)
+	  {
+	    startR = r+1;
+	    break;
+	  }
+	}
+	/*
+	int hl = min(endR-R/2, R/2-startR);
+	startR = R/2 - hl;
+	endR = R/2 + hl;
+	*/
+	//cout << "endR: "  << endR << endl;
+	//cout << "startR: "  << startR << endl;
+	/*
+
+	int sR[MAXR], sC[MAXC];
+	sR[0] = isOkRow[0];
+	for(int r = 1; r < R; r++) sR[r] = sR[r - 1] + isOkRow[r];
+	int startR = -1, endR = -1;
+	int d = 30;
+	for(int r = 0; r + d < R; r++) {
+		if(sR[r + d] - sR[r] > d * 9 / 10) {
+			startR = r;
+			break;
+		}
+	}
+	for(int r = R - 1; r - d >= 0; r--) {
+		if(sR[r] - sR[r - d] > d * 9 / 10) {
+			endR = r;
+			break;
+		}
+	}
+	cout << "startR: " << startR << endl;
+	cout << "endR: " << endR << endl;
+	if(startR == -1 && endR == -1) return;
+	
+	startR = startR + 3;
+	endR = endR - 3;
+	
+	// remove border
+	for (int c = 0; c < 0.15 * C; c++)
+	{
+	}
+	
+	/* don't know its usage
+	for(int r = 0; r < R; r++) {
+		for(int c = 5; c < C; c++) {
+			if(r < startR || r > endR) LP.at<uchar>(r, c) = 0;
+		}
+	}
+	*/
+	/* to do(vertical cut)
+	int startC = -1, endC = -1;
+	for(int c=0; c < C; c++)
+	{
+	  
+	}
+	*/
+	
+	
+
+
+
+	LPRect.y += startR;
+	LPRect.height = endR - startR + 1;
+	LP = LP(Rect(0, startR, LP.cols, endR - startR + 1));
+	//OutputImage(LP);
+	RRR = RRR(Rect(0, startR, LP.cols, endR - startR + 1));
+}
+
+
+
+void ScanToCutVerticalFrame(Mat& LP, Rect& LPRect, Mat& RRR) {
+	int R = LP.rows;
+	int C = LP.cols;
+	//medianBlur(LP, LP, 5);
+ 	//OutputImage(LP);
+	int isOkRow[MAXR], rCount[MAXR];
+	memset(isOkRow, 0, sizeof(isOkRow));
+	memset(rCount, 0, sizeof(rCount));
+
+	for(int r = 0; r < R; r++) {
+		int nChange = 0;
+		for(int c = 5; c < C; c++) {
+			if(LP.at<uchar>(r, c) != LP.at<uchar>(r, c - 5)) nChange++;
+			if(LP.at<uchar>(r, c) == 255) rCount[r]++;
+		}
+		int percent = 100.0 * rCount[r] / C;
+		if(nChange > 10 && percent > 10 && percent < 70) isOkRow[r] = 1;
+		if(nChange < 10 && (percent < 10 || percent > 70)) {
+			isOkRow[r] = -100;
+		}
+	}
+	int startR = 1, endR = 100;
+	for(int r = R/2; r < R; r++)
+	{
+	  if(rCount[r] < 50)
+	  {
+	    endR = r-1;
+	    break;
+	  }
+	}
+	
+	for(int r = R/2; r > 0; r--)
+	{
+	  if(rCount[r] < 50)
+	  {
+	    startR = r+1;
+	    break;
+	  }
+	}
+	int hl = min(endR-R/2, R/2-startR);
+	startR = R/2 - hl;
+	endR = R/2 + hl;
+
+	
+	
+
+
+
+	LPRect.y += startR;
+	LPRect.height = endR - startR + 1;
+	LP = LP(Rect(0, startR, LP.cols, endR - startR + 1));
+	OutputImage(LP);
+	RRR = RRR(Rect(0, startR, LP.cols, endR - startR + 1));
+}
+
+
+vector<Rect> LicensePlate::LPCharSegmentation(Rect LPRect) {
+  
+	Mat ROI = LPRedChannel(LPRect).clone();
+	ImageEnhancement(ROI);
+	
+	//namedWindow("ii");
+	//imshow("ii", ROI);
+	//waitKey(0);
+	Mat temp, RRR;
+	ROI.copyTo(temp);
+	OutputImage(ROI);
+	double theta_record = horizen(ROI,temp);
+	//double theta_record;
+
+	//namedWindow("iir");
+	//imshow("iir", ROI);
+	//waitKey(0);
+	
+	//OutputImage(ROI);
+	ROI = temp;
+	OutputImage(ROI);
+	temp.copyTo(RRR);
+	
+
+
+	threshold(ROI, ROI, 0, 255, CV_THRESH_BINARY | CV_THRESH_OTSU);
+	//threshold(ROI, ROI, 50, 255, CV_THRESH_BINARY);
+	OutputImage(ROI);
+		// for other color license plate
+	int black=0, white = 0;
+
+	for(int i=20; i<ROI.rows-20; i++)
+	{
+	  for(int j=20; j<ROI.cols-20; j++)
+	  {
+	    if(ROI.at<uchar>(i,j) == 0)
+	    {
+	      black++;
+	    }
+	    else{
+	      white++;
+	    }
+	  }
+	}
+	//cout << "black: " << black << " white: " << white << endl;
+	
+	if(black < white)
+	{
+	  for(int i=0; i<ROI.rows; i++)
+	  {
+	    for(int j=0; j<ROI.cols; j++)
+	    {
+	     ROI.at<uchar>(i,j) = 255 - ROI.at<uchar>(i,j); 
+	    }
+	    
+	  }
+	}
+	
+	
+	OutputImage(ROI);
+	ScanToCutHorizenFrame(ROI, LPRect, RRR);
+	/*
+	vector<int> aa;
+	vector<Rect> rr;
+	GetComponent(ROI, aa, rr);
+	DeleteSmallNonLPCompoent(ROI, aa, rr, 10);
+	
+	
+
+	//OutputImage(ROI);
+	
+	Mat RR = ROI.clone();
+	Mat One = getStructuringElement(MORPH_CROSS, Size(65, 1));
+	morphologyEx(RR, RR, MORPH_CLOSE, One);
+	vector<int> ar;
+	vector<Rect> rt;
+
+	GetComponent(RR, ar, rt);
+	int maxRectArea = 0, p = -1;
+	for(int i = 0; i < ar.size(); i++) {
+		if(maxRectArea < ar[i]) {
+			maxRectArea = ar[i];
+			p = i;
+		}
+	}
+	cout << "LPRect.x" << LPRect.x << endl;
+	cout << "LPRect.y" << LPRect.y << endl;
+	LPRect.x += rt[p].x;
+	LPRect.y += rt[p].y;
+	LPRect.width = rt[p].width;
+	LPRect.height = rt[p].height;
+	
+	cout << "LPRect.x" << LPRect.x << endl;
+	cout << "LPRect.y" << LPRect.y << endl;
+
+	//OutputImage(ROI);
+	//imwrite("ROI1.jpg", ROI);
+	ROI = ROI(rt[p]);
+	//imwrite("ROI2.jpg", ROI);
+	//OutputImage(ROI);
+	*/
+	
+	OutputImage(ROI);
+	//OutputImage(RRR);
+
+	
+	//cout << "ROI" << endl;
+	//OutputImage(ROI);
+	
+	theta_record = vertical(ROI,temp);
+	ROI = temp;
+	OutputImage(ROI);
+	//cout << " vertical rotate" << endl;
+
+	int xHist[MAXC];
+	memset(xHist, 0, sizeof(xHist));
+
+	int Cut = 3;
+	for(int r = 0; r < ROI.rows; r++) {
+		//if(r < Cut || r + Cut - 1 >= ROI.rows) continue;
+		for(int c = 0; c < ROI.cols; c++) {
+			if(ROI.at<uchar>(r, c)) xHist[c]++;
+		}
+	}
+
+	int N = ROI.cols;
+	int rk[MAXC];
+	memcpy(rk, xHist, sizeof(rk));
+	sort(rk, rk + N);
+	int bottomThreshold = 0;
+	int topThreshold = 0;
+	int percent = N / 3;
+	for(int i = 0; i < percent; i++) {
+		bottomThreshold += rk[i];
+		topThreshold += rk[N - i - 1];
+	}
+	bottomThreshold /= percent;
+	topThreshold /= percent;
+
+	bottomThreshold = max(topThreshold / 10, bottomThreshold);
+	//cout << "bottomThreshold: " << bottomThreshold << endl;
+	bool isTop[MAXC];
+	for(int i = 0; i < N; i++) {
+		isTop[i] = (xHist[i] >=  bottomThreshold);
+		//cout << i << " " << xHist[i] << " " << isTop[i] << endl;
+	}
+	Mat hist(1, ROI.cols, CV_8UC1);
+	vector<pair<int, int> > interval, unionInterval;
+	for(int i = 0; i < ROI.cols; i++) {
+		hist.at<uchar>(0, i) = isTop[i];
+		if(isTop[i]) interval.push_back(make_pair(i, i + 1));
+	}
+	
+	int L, R = -100;
+	bool ischi = true;
+	int cut_th = 1; // for chinese ,set it big
+	for(int i = 0; i < interval.size(); i++) {
+		int l = interval[i].first;
+		int r = interval[i].second;
+		//cout << "l: " << l << " r: " << r << endl;
+		if(l - R < cut_th) {
+			R = r;
+		} else {
+			if(R != -100) 
+			{
+			  
+			  if(R-L>10 || ((R-L>3 && xHist[(R+L)/2]>5*bottomThreshold)))
+			  {
+			    if(ischi)
+			    {
+			      if(R-L>15)
+			      {
+				if(R-L > ROI.cols/7)
+				{
+				  unionInterval.push_back(make_pair(L, (L+R)/2));
+				  //cout << "L: " << L << " R: " << (L+R)/2 << endl; 
+				  unionInterval.push_back(make_pair((L+R)/2, R));
+				  //cout << "L: " << (L+R)/2 << " R: " << R << endl; 
+				}
+				else
+				{
+				  unionInterval.push_back(make_pair(L, R));
+				  //cout << "L: " << L << " R: " << R << endl; 
+				}
+				ischi = false;
+			      }
+			    }
+			    else
+			    {
+			      if(R-L > ROI.cols/7)
+			      {
+				unionInterval.push_back(make_pair(L, (L+R)/2));
+				//cout << "L: " << L << " R: " << (L+R)/2 << endl; 
+				unionInterval.push_back(make_pair((L+R)/2, R));
+				//cout << "L: " << (L+R)/2 << " R: " << R << endl; 
+			      }
+			      else
+			      {
+				unionInterval.push_back(make_pair(L, R));
+				//cout << "L: " << L << " R: " << R << endl; 
+			      }
+			      
+			      ischi = false;
+			      cut_th = 1;
+			    }
+			  }
+			}
+			
+			L = l, R = r;
+		}
+	}
+	if(R != -100) unionInterval.push_back(make_pair(L, R));
+	
+
+	int OX = LPRect.x;
+	int OY = LPRect.y;
+	int H = LPRect.height;
+	
+
+
+
+	
+	vector<Rect> ret;
+	//when it wrong, use fixed length
+	
+	bool seg_right = true;
+	if(unionInterval[1].first > 60 || (unionInterval[1].second - unionInterval[1].first <= 20))
+	{
+	  if(unionInterval.size()==6)
+	  {
+	    unionInterval.push_back(make_pair(212,230));
+	  }
+	  if(unionInterval.size()!=7)
+	  {
+	    seg_right = false;
+	  }
+	  else
+	  {
+	    for(int i=6; i>0; i--)
+	    {
+	      unionInterval[i].second = unionInterval[i-1].second;
+	      unionInterval[i].first = unionInterval[i-1].first;
+	    }
+	    unionInterval[0].second = unionInterval[1].first - 4;
+	    unionInterval[0].first = max(1,unionInterval[0].second-28);
+	  }
+
+	}
+	if(unionInterval.size()<7 || unionInterval.size()>9) seg_right = false;
+	//cout << "size: " << unionInterval.size() << endl;
+	//cout << " seg_right: " << seg_right << endl;
+	
+
+	//cout << " seg_right: " << seg_right << endl;
+	for(int i = 0; i < unionInterval.size(); i++)
+	{
+	  int length = unionInterval[i].second - unionInterval[i].first;
+	  if(length > 35) seg_right = false;
+	  //cout << "i: " << i << " length: " << length << endl;
+	}
+	
+	
+	
+	//seg_right = true;
+	if(!seg_right)
+	{
+	  while(unionInterval.size()<7)
+	  {
+	    unionInterval.push_back(make_pair(0,0));
+	  }
+	   
+	  unionInterval[1].first =40;
+	  unionInterval[1].second = unionInterval[1].first + 28;
+	  unionInterval[2].first =84;
+	  unionInterval[2].second = unionInterval[2].first + 28;
+	  unionInterval[3].first =116;
+	  unionInterval[3].second = unionInterval[3].first + 28;
+	  unionInterval[4].first =148;
+	  unionInterval[4].second = unionInterval[4].first + 28;
+	  unionInterval[5].first =180;
+	  unionInterval[5].second = unionInterval[5].first + 28;
+	  unionInterval[6].first =212;
+	  unionInterval[6].second = unionInterval[6].first + 28;
+	}
+	
+	
+	for(int i = 0; i < unionInterval.size(); i++) {
+	  if (i > 6) break;
+	  if(i==0) continue;
+	  ostringstream ss;
+	  ss << i+1;
+	  ostringstream sss;
+	  sss << num;
+	  //string img_name = "../thredbw_character/" + sss.str() + "_" + ss.str() + ".jpg";
+	  string img_name = "character_test_stable/" + sss.str() + "_" + ss.str() + ".jpg";
+	  //cout << "i: " << i << " l: " << unionInterval[i].first << " r: " << unionInterval[i].second << endl;
+	  Mat img = ROI(Rect(unionInterval[i].first, 0, unionInterval[i].second - unionInterval[i].first, ROI.rows));
+	  Mat reimg;
+	  resize(img,reimg,Size(128,128));
+	  OutputImage(reimg);
+	  imwrite(img_name, reimg);
+	  //ret.push_back(Rect(unionInterval[i].first + OX, OY, unionInterval[i].second - unionInterval[i].first, H));
+	}
+	//cout << "width: " << RRR.cols << " height: " << RRR.rows << endl;
+	return ret;
+}
+
+void LicensePlate::LPRun() {
+	Mat gray = LPPreproccessing(LP);
+
+	//Rect place = LPDetection(gray);
+	Rect place;
+	place.x = 0;
+	place.y = 0;
+	place.width = 250;
+	place.height = 100;
+	//rectangle(LP, place, Scalar(255, 255, 255), 1);
+	//namedWindow("hh");
+	//imshow("hh", LP);
+	//waitKey(0);
+	//rectangle(LPColor, place, Scalar(255, 255, 255), 1);
+	
+	
+
+	vector<Rect> VectorCharRect = LPCharSegmentation(place);
+	/*
+	for(int i = 0; i < VectorCharRect.size(); i++) {
+	  rectangle(LPColor, VectorCharRect[i], Scalar(0, 255, 255), 2);
+	}
+	*/
+	//imwrite("output.jpg", LPColor);
+	//OutputImage(LPColor);
+}
+
+void LicensePlate::LPWrite(const string& path) {
+	//OutputImage(LPColor);
+	//imwrite(path, LPColor);
+}
