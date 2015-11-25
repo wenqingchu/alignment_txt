@@ -122,12 +122,18 @@ void vertical_cut(const Mat &src, Mat &dst) {
 
 double LicensePlate::horizen(const Mat &src, Mat &dst) {
 	int sz = (int)sqrt(double(src.rows * src.rows) + double(src.cols * src.cols)) + 10;
+	int lp_sz = (int)sqrt(double(LP.rows * LP.rows) + double(LP.cols * LP.cols)) + 10;
 	Mat img_ext = Mat(sz, sz, CV_8UC1, Scalar::all(0));
 	Mat myimg_ext = Mat(sz, sz, CV_8UC1, Scalar::all(0));
 
-	Mat myLP_ext = Mat(sz, sz, CV_8UC3, Scalar::all(0));
-	Mat myLP_dst;
-	LP.copyTo(myLP_dst);
+	Mat myLP_ext;
+	if (LP.channels() == 3){
+	  myLP_ext = Mat(lp_sz, lp_sz, CV_8UC3, Scalar::all(0));
+	}
+	else{
+	  myLP_ext = Mat(lp_sz, lp_sz, CV_8UC1, Scalar::all(0));
+	}
+	
 	Mat temp;
 	
 	//threshold(src, temp, 0, 255, CV_THRESH_BINARY | CV_THRESH_OTSU);
@@ -138,9 +144,12 @@ double LicensePlate::horizen(const Mat &src, Mat &dst) {
 	int st_col = sz / 2 - src.cols / 2;
 	
 	
+	int lp_st_row = lp_sz / 2 - LP.rows / 2;
+	int lp_st_col = lp_sz / 2 - LP.cols / 2;
+	
 	src.copyTo(img_ext(Range(st_row, st_row+src.rows), Range(st_col, st_col+src.cols)));
 	temp.copyTo(myimg_ext(Range(st_row, st_row+temp.rows), Range(st_col, st_col+temp.cols)));	
-	LP.copyTo(myLP_ext(Range(st_row, st_row+LP.rows), Range(st_col, st_col+LP.cols)));
+	LP.copyTo(myLP_ext(Range(lp_st_row, lp_st_row+LP.rows), Range(lp_st_col, lp_st_col+LP.cols)));
 	
 	int project_max = 0, submax = 0;
 	double theta_record;
@@ -159,46 +168,64 @@ double LicensePlate::horizen(const Mat &src, Mat &dst) {
 	}
 	rotate_image(img_ext, dst, theta_record);
 	rotate_image(myLP_ext, myLP_ext, theta_record);
-	Mat tmp;
-	rotate_image(LP, LP, theta_record);
-	//OutputImage(tmp);
-	//imwrite("tmp.jpg",LP);
 	
 	int s = src.rows - src.cols * tan(theta_record * 3.141592654 / 180);
+	int lp_s = LP.rows - LP.cols * tan(theta_record * 3.141592654 / 180);
 	s = s * cos(theta_record * 3.141592654 / 180) + 5; 
+	lp_s = lp_s * cos(theta_record * 3.141592654 / 180) + 20;
+	lp_s = LP.rows;
+	/*
 	if(theta_record < 0)
 	{
 	  s = src.rows;
+	  lp_s = LP.rows;
 	}
-	s = (src.rows + s) / 2;
+	*/
+	//s = (src.rows + s) / 2;
+	//lp_s = (LP.rows + lp_s) / 2;
 	
 	int c = src.cols+10;
+	int lp_c = LP.cols+20;
 	
+	/*
 	if(theta_record > 0 && theta_record < 45)
 	{
 	  c = src.cols / (cos((theta_record) * 3.141592654 / 180));
-	  //c = src.cols * cos((theta_record) * 3.141592654 / 180) + src.cols * sin((theta_record) * 3.141592654 / 180);
 	}
+	*/
+	c = src.cols / (cos((theta_record) * 3.141592654 / 180));
+	lp_c = LP.cols / (cos((theta_record) * 3.141592654 / 180));
 
 	Rect ds;
-	ds.x = sz/2 - c/2-5;
-	ds.y = sz/2 - s/2;
-	ds.width = c+10; 
-	ds.height = s;
-	//cout << ds.x << " "  << ds.y << " " << c << " " << s << endl;
-	//cout << sz << endl;
-
-	//OutputImage(dst);
-	dst = dst(ds);
-	//OutputImage(dst);
-	//OutputImage(myLP_ext);
-	//myLP_dst = myLP_ext(ds);
-	//OutputImage(myLP_dst);
-	resize(dst,dst,src.size());
-	//resize(myLP_dst,LP,LP.size());
+	c = c + 10;
+	s = s + 4;
+	lp_c = lp_c + 10;
+	lp_s = lp_s + 8;
 	
+	if (c>sz)
+	{
+	  c = sz;
+	}
+	if (lp_c>lp_sz)
+	{
+	  lp_c = lp_sz;
+	}
+	
+	ds.x = sz/2 - c/2;
+	ds.y = sz/2 - s/2;
+	ds.width = c; 
+	ds.height = s;
 
-	//cout << "horizon: " << theta_record << endl;
+	dst = dst(ds);
+
+	resize(dst,dst,src.size());
+	
+	ds.x = lp_sz/2 - lp_c/2;
+	ds.y = lp_sz/2 - lp_s/2;
+	ds.width = lp_c; 
+	ds.height = lp_s;
+	
+	LP = myLP_ext(ds);
 	
 
 	return theta_record;
@@ -225,7 +252,7 @@ double LicensePlate::vertical(const Mat &src, Mat &dst) {
 	double theta_record,stheta;
 	int sum;
 	Mat img_rot;
-	for (double theta = 82; theta < 98; ++theta) {
+	for (double theta = 75; theta < 105; ++theta) {
 	  if(theta == 90) continue;
 	  rotate_image(myimg_ext, img_rot, theta);
 	  sum = myproject_sum(img_rot);
@@ -238,10 +265,40 @@ double LicensePlate::vertical(const Mat &src, Mat &dst) {
 
 	theta_record = 90 - theta_record;
 	
+	int LP_c = LP.cols + 2 * LP.rows * abs(tan(theta_record * 3.141592654 / 180));
+	Mat myLP_ext;
+	//cout << LP.cols << " " << LP.rows << endl;
+	//cout << LP_c << endl;
+	if (LP.channels() == 3){
+	  myLP_ext = Mat(LP.rows, LP_c, CV_8UC3, Scalar::all(0));
+	}
+	else{
+	  myLP_ext = Mat(LP.rows, LP_c, CV_8UC1, Scalar::all(0));
+	}
+	//cout << myLP_ext.cols << " " << myLP_ext.rows << endl;
+	LP.copyTo(myLP_ext(Range(0, LP.rows), Range((LP_c-LP.cols)/2, (LP_c-LP.cols)/2+LP.cols)));
+	
+	//OutputImage(myLP_ext);
+		
+	vector<Point2f> corners(4);  
+
+	vector<Point2f> corners_trans(4);  
+	corners_trans[0] = Point2f(LP.cols-1,0);  
+	corners_trans[1] = Point2f(LP.cols-1,LP.rows-1);  
+	corners_trans[2] = Point2f(0,LP.rows-1);  
+	corners_trans[3] = Point2f(0,0);  
+	
+	
 	if(theta_record > 0)
 	{
+	  corners[0] = Point2f(LP.cols + (LP_c - LP.cols) / 2 -1,0);  
+	  corners[1] = Point2f(LP_c-1,LP.rows-1);  
+	  corners[2] = Point2f((LP_c - LP.cols) / 2-1, LP.rows-1);  
+	  corners[3] = Point2f(0,0);  
 	  
 	  
+
+	  /*
 	  for(int i=0; i<LP.rows; i++)
 	  {
 	    int start = i * tan(theta_record * 3.141592654 / 180);
@@ -252,10 +309,18 @@ double LicensePlate::vertical(const Mat &src, Mat &dst) {
 	      LP.at<Vec3b>(i,j) = LP.at<Vec3b>(i, start+j);
 	    }
 	  }
+	  */
 
 	}
 	else if(theta_record < 0)
 	{
+	  
+	  
+	  corners[0] = Point2f(LP_c-1,0);  
+	  corners[1] = Point2f(LP.cols + (LP_c - LP.cols) / 2-1,LP.rows-1);  
+	  corners[2] = Point2f(0, LP.rows-1);  
+	  corners[3] = Point2f((LP_c - LP.cols) / 2-1,0); 
+	  /*
 	  theta_record = -theta_record;
 	  for(int i=0; i<LP.rows; i++)
 	  {
@@ -267,7 +332,16 @@ double LicensePlate::vertical(const Mat &src, Mat &dst) {
 	      LP.at<Vec3b>(i,j) = LP.at<Vec3b>(i, start+j);
 	    }
 	  }
+	  */
 	}
+	//cout << corners << endl;
+	//cout << corners_trans << endl;
+	//cout << myLP_ext.cols << " " << myLP_ext.rows << endl;
+	//cout << LP.cols << " " << LP.rows << endl;
+	
+	Mat mapMatrix = getPerspectiveTransform(corners,corners_trans);
+	warpPerspective(myLP_ext, LP, mapMatrix, cv::Size(LP.cols + (LP_c - LP.cols) / 2, LP.rows));
+	//cout << theta_record << endl;
 	return theta_record;
 	
 }

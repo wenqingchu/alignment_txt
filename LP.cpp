@@ -424,13 +424,13 @@ void LicensePlate::ScanToCutHorizenFrame(Mat& LP, Rect& LPRect) {
 		isOkCol[c] = nChange;
 		//printf("c:%d, nChange:%d, cCount:%d\n", c, nChange, cCount[c]);
 	}
-	int startC = 2, endC = 248;
+	int startC = 2, endC = int(100.0 / LP.rows * LP.cols)-2;
 
 	LPRect.x += startC;
 	LPRect.width = endC - startC + 1;
 
-	
-	LP = LP(Rect(startC, startR, endC - startC + 1, endR - startR + 1));
+	cout << "hh" << endl;
+	//LP = LP(Rect(startC, startR, endC - startC + 1, endR - startR + 1));
 	
   
 }
@@ -446,7 +446,7 @@ void LicensePlate::LPAlignment() {
 	Mat temp;
 	ROI.copyTo(temp);
 	horizen_record = horizen(ROI,temp);
-	/*
+	
 	ROI = temp;
 
 	threshold(ROI, ROI, 0, 255, CV_THRESH_BINARY | CV_THRESH_OTSU);
@@ -478,11 +478,10 @@ void LicensePlate::LPAlignment() {
 	    
 	  }
 	}
-	*/
-	//vector<int> aa;
-	//vector<Rect> rr;
-	//GetComponent(ROI, aa, rr);
-	//DeleteSmallNonLPCompoent(ROI, aa, rr, 100);
+	vector<int> aa;
+	vector<Rect> rr;
+	GetComponent(ROI, aa, rr);
+	DeleteSmallNonLPCompoent(ROI, aa, rr, 100);
 	//Rect place;
 	//place.x = 0;
 	//place.y = 0;
@@ -490,7 +489,7 @@ void LicensePlate::LPAlignment() {
 	//place.height = 100;
 	
 	//ScanToCutHorizenFrame(ROI, place);
-	//vertical_record = vertical(ROI,temp);
+	vertical_record = vertical_record = vertical(ROI,temp);
 }
 
 Mat LicensePlate::LPRun() {
